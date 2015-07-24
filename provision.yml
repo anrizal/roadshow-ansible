@@ -1,0 +1,36 @@
+- hosts: localhost
+  connection: local
+  gather_facts: False
+  vars:
+    ami_id: "ami-10663b78"
+    my_region: "us-east-1"
+
+  tasks:
+    - set_fact:
+        ec2_region: "{{ lookup('env', 'ami_id')
+                        | default(ami_id, true) }}"
+      when: ec2_region is not defined
+
+    - name: Provision the Roadshow instances
+      ec2:
+         key_name: "aws-default"
+         group: ["v3","default"]
+         instance_type: t2.micro
+         image: "{{ ami_id }}"
+         region: "{{ my_region }}"
+         wait: true
+         exact_count: 1
+         count_tag:
+            Name: roadshow-machine
+         instance_tags:
+            Name: roadshow-machine
+         volumes:
+           - device_name: /dev/sda1
+             device_type: gp2
+             volume_size: 10
+             delete_on_termination: true
+           - device_name: /dev/xvdb
+             device_type: gp2
+             volume_size: 30
+             delete_on_termination: true
+      register: ec2
