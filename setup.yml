@@ -1,0 +1,128 @@
+# vim: set ft=ansible:
+---
+- name: 'Setup groups'
+  hosts: localhost
+  connection: local
+  become: no
+  tags: 
+    - 'setup'
+  tasks:
+  - name: wait for ssh
+    wait_for: "port=22 host={{ item }}"
+    with_items: groups['tag_Cluster_roadshow']
+  - name: Configure systems group
+    add_host:
+      name: "{{ item }}"
+      groups: systems
+    with_items: groups['tag_Cluster_roadshow']
+  - name: Configure master group
+    add_host:
+      name: "{{ item }}"
+      groups: master
+    with_items: groups['tag_Name_master']
+
+- name: Register hosts
+  hosts: systems
+  gather_facts: no
+  serial: 1
+  tags: 
+    - 'register'
+  tasks:
+  - name: Register host
+    redhat_subscription:
+      username: "someuser"
+      password: "somepass"
+      state: present
+      pool: "^(60 Day Supported OpenShift Enterprise|OpenShift Enterprise, Standard|OpenShift Enterprise, Premium|Employee)"
+    register: register_result
+
+  - name: Disable all known rhsm repos
+    command: subscription-manager repos --disable='*'
+    when: register_result | changed
+
+  - name: Subscribe only to the ose repo
+    command: 'subscription-manager repos --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-ose-3.3-rpms"'
+    when: register_result | changed
+
+- name: Miscellaneous Host Configuration
+  hosts: systems
+  tags:
+    - 'misc'
+  tasks:
+  - name: Update
+    yum:
+      name: '*'
+      state: latest
+
+  - name: Docker storage setup file
+    shell: |
+      echo DEVS='/dev/xvdb' > /etc/sysconfig/docker-storage-setup 
+      echo VG=docker_vg >> /etc/sysconfig/docker-storage-setup 
+
+  - name: Packages
+    yum:
+      name: '{{item}}'
+      state: installed
+    with_items:
+      - wget 
+      - git 
+      - net-tools 
+      - bind-utils 
+      - iptables-services 
+      - bridge-utils 
+      - bash-completion 
+      - vim-enhanced 
+      - docker-1.10.3
+
+  - name: Start docker
+    service:
+      name: docker
+      state: started
+
+  - name: Pull images
+    shell: "docker pull {{item}}"
+    with_items:
+      - openshift3/nodejs-010-rhel7:latest
+      - openshift3/ose-pod:latest
+      - openshift3/ose-sti-builder:latest
+      - openshift3/ose-docker-builder:latest
+      - openshift3/ose-deployer:latest
+      - rhscl/mongodb-26-rhel7:latest
+      - rhscl/mongodb-32-rhel7:latest
+      - jboss-eap-7/eap70-openshift:latest
+      - openshiftdemos/parksmap:latest
+      - kubernetes/guestbook:latest
+
+  - name: reboot
+    shell: sleep 2 && shutdown -r now "Ansible updates triggered"
+    async: 1
+    poll: 0
+    sudo: true
+    ignore_errors: true
+
+  - name: wait for ssh
+    wait_for: "port=22 host={{ inventory_hostname }}"
+
+- name: Master stuff
+  hosts: master
+  tags:
+    - 'master'
+  tasks:
+  - name: wait for ssh
+    wait_for: "port=22 host={{ inventory_hostname }}"
+
+  - name: Deploy pubkey
+    copy:
+      src: "id_rsa"
+      dest: "/root/.ssh/id_rsa"
+      mode: 0600
+  - name: atomic-openshift-utils package
+    yum:
+      name: atomic-openshift-utils
+      state: installed
+  - name: tmux and other config
+    shell: "curl -L http://bit.ly/tmuxme | bash"
+  - name: Ansible hosts file
+    copy:
+      src: "hosts"
+      dest: "/etc/ansible/hosts"

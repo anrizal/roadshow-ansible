@@ -1,36 +1,86 @@
+# vim: set ft=ansible:
+---
 - hosts: localhost
   connection: local
   gather_facts: False
+  become: false
   vars:
-    ami_id: "ami-10663b78"
+    ami_id: "ami-10251c7a"
     my_region: "us-east-1"
 
   tasks:
-    - set_fact:
-        ec2_region: "{{ lookup('env', 'ami_id')
-                        | default(ami_id, true) }}"
-      when: ec2_region is not defined
-
-    - name: Provision the Roadshow instances
+    - name: Provision master
       ec2:
-         key_name: "aws-default"
-         group: ["v3","default"]
-         instance_type: t2.micro
+         key_name: "roadshow"
+         group: ["v3","default","v3-router"]
+         instance_type: t2.large
          image: "{{ ami_id }}"
          region: "{{ my_region }}"
          wait: true
+         vpc_subnet_id: "subnet-a0de07d7"
          exact_count: 1
          count_tag:
             Name: roadshow-machine
          instance_tags:
-            Name: roadshow-machine
+            Name: master
+            Cluster: roadshow
          volumes:
            - device_name: /dev/sda1
              device_type: gp2
-             volume_size: 10
+             volume_size: 20
              delete_on_termination: true
            - device_name: /dev/xvdb
              device_type: gp2
              volume_size: 30
              delete_on_termination: true
-      register: ec2
+      register: master
+    - name: Provision infra
+      ec2:
+         key_name: "roadshow"
+         group: ["v3","default","v3-router"]
+         instance_type: m4.2xlarge
+         image: "{{ ami_id }}"
+         region: "{{ my_region }}"
+         wait: true
+         vpc_subnet_id: "subnet-a0de07d7"
+         exact_count: 1
+         count_tag:
+            Name: roadshow-machine
+         instance_tags:
+            Name: infra
+            Cluster: roadshow
+         volumes:
+           - device_name: /dev/sda1
+             device_type: gp2
+             volume_size: 20
+             delete_on_termination: true
+           - device_name: /dev/xvdb
+             device_type: gp2
+             volume_size: 30
+             delete_on_termination: true
+      register: infra
+    - name: Provision nodes
+      ec2:
+         key_name: "roadshow"
+         group: ["v3","default","v3-router"]
+         instance_type: t2.large
+         image: "{{ ami_id }}"
+         region: "{{ my_region }}"
+         wait: true
+         vpc_subnet_id: "subnet-a0de07d7"
+         exact_count: 6
+         count_tag:
+            Name: roadshow-machine
+         instance_tags:
+            Name: node
+            Cluster: roadshow
+         volumes:
+           - device_name: /dev/sda1
+             device_type: gp2
+             volume_size: 20
+             delete_on_termination: true
+           - device_name: /dev/xvdb
+             device_type: gp2
+             volume_size: 30
+             delete_on_termination: true
+      register: node
